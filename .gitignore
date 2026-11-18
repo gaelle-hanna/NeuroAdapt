@@ -1,0 +1,59 @@
+# Local configuration
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Dependencies and caches
+.venv/
+venv/
+node_modules/
+.npm-cache/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.py[cod]
+.coverage*
+coverage/
+
+# Build and test output
+build/
+dist/
+.vite/
+test-results/
+playwright-report/
+playwright/.cache/
+screenshots/
+traces/
+tmp/
+temp/
+*.log
+*.tmp
+
+# Local database data and backups
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.sql
+!/database/schema.sql
+*.sql.*
+*.dump
+*.bak
+*.backup
+backups/
+
+# Original proposal contains personal contact details.
+/docs/Project Proposal.pdf
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
