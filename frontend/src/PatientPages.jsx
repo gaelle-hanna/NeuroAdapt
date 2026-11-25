@@ -383,6 +383,7 @@ export function RoleDetailsFields({
             name="date_of_birth"
             type="date"
             required={required}
+            min="1900-01-01"
             max={maxBirthDate}
             defaultValue={profile.date_of_birth}
             autoComplete="bday"
@@ -392,7 +393,7 @@ export function RoleDetailsFields({
           label="Phone"
           name="phone"
           type="tel"
-          required={required}
+          required={required || professional}
           defaultValue={profile.phone}
           pattern=" *\+?(?:[ \(\)\-]*[0-9]){7,15}[ \(\)\-]*"
           title="Enter 7 to 15 digits. Spaces, parentheses, hyphens and a leading + are supported."
@@ -418,7 +419,9 @@ export function RoleDetailsFields({
             <Field
               label="Workplace"
               name="workplace"
-              required={required}
+              required
+              pattern={required ? undefined : ".*\\S.*"}
+              title={required ? undefined : "Enter a workplace containing at least one non-space character."}
               defaultValue={profile.workplace}
               maxLength={150}
               autoComplete="organization"

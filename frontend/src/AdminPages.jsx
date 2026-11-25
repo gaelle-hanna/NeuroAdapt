@@ -135,7 +135,6 @@ export function ManageUsers() {
                   : "Create professional"
             }
             onSubmit={async (data) => {
-              if (editing && !data.phone) data.phone = null;
               if (adding === "patient") {
                 for (const field of ["phone", "date_of_birth", "address"]) {
                   if (!data[field]) data[field] = null;

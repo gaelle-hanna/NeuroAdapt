@@ -73,6 +73,8 @@ class PatientProfile(Profile):
     @field_validator('date_of_birth')
     @classmethod
     def past_birth(cls, v):
+        if v and v < date(1900, 1, 1):
+            raise ValueError('Date of birth must be on or after January 1, 1900')
         if v and v > date.today():
             raise ValueError('Date of birth cannot be in the future')
         return v
@@ -86,9 +88,10 @@ class CreatePatient(Registration, PatientProfile):
 
 
 class ProfessionalProfile(Profile):
+    phone: Phone
     specialization: Name
     license_number: Name
-    workplace: str | None = Field(default=None, max_length=150)
+    workplace: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)]
 
 
 class CreateProfessional(Registration):

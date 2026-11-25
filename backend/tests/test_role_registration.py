@@ -63,4 +63,10 @@ def test_phone_validation_is_shared_by_creation_and_profile_updates(client, admi
 
     assert client.put(update_path, json={**update, 'phone': '(123) 4567'}, headers=auth).json()['phone'] == '(123) 4567'
     assert client.put(update_path, json={**update, 'phone': formatted}, headers=auth).json()['phone'] == normalized
-    assert client.put(update_path, json={**update, 'phone': None}, headers=auth).json()['phone'] is None
+    cleared = client.put(update_path, json={**update, 'phone': None}, headers=auth)
+    if role == 'professional':
+        assert cleared.status_code == 422
+        assert client.get('/api/profiles/me', headers=auth).json()['phone'] == normalized
+    else:
+        assert cleared.status_code == 200
+        assert cleared.json()['phone'] is None
