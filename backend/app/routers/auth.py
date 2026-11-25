@@ -1,7 +1,7 @@
 import secrets
 import logging
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -39,7 +39,8 @@ def me(user=Depends(current_user), db: Session = Depends(get_db)):
 
 
 @router.post('/forgot-password')
-def forgot(data: ForgotPassword, request: Request, db: Session = Depends(get_db)):
+def forgot(data: ForgotPassword, request: Request, background_tasks: BackgroundTasks,
+           db: Session = Depends(get_db)):
     limiter.check(request, 'reset', 5)
     response = {'message': 'If your address is registered, check your inbox for reset instructions.'}
     user = db.scalar(select(User).where(User.Email == str(data.email).lower(), User.Status == 'active').with_for_update())
@@ -50,14 +51,18 @@ def forgot(data: ForgotPassword, request: Request, db: Session = Depends(get_db)
         commit(db)
         link = f'{settings.frontend_url}/reset-password#token={token}'
         if settings.smtp_host:
-            try:
-                send_reset(user.Email, link)
-            except Exception:
-                # Never log SMTP exception details, addresses, or reset links.
-                logging.getLogger(__name__).error('Password reset email delivery failed')
+            background_tasks.add_task(deliver_reset_email, user.Email, link)
         elif settings.environment == 'development' and settings.dev_reset_links:
             response['development_reset_link'] = link
     return response
+
+
+def deliver_reset_email(email, link):
+    try:
+        send_reset(email, link)
+    except Exception:
+        # Never log SMTP exception details, addresses, or reset links.
+        logging.getLogger(__name__).error('Password reset email delivery failed')
 
 
 @router.post('/reset-password')

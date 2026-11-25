@@ -101,6 +101,7 @@ export function Field({
 export function Form({
   onSubmit,
   onSubmitStart,
+  feedbackVersion,
   children,
   submit = "Save changes",
   cancel,
@@ -111,6 +112,12 @@ export function Form({
   const [error, setError] = useState(""),
     [message, setMessage] = useState(initialMessage),
     [busy, setBusy] = useState(false);
+  useEffect(() => {
+    if (feedbackVersion !== undefined) {
+      setError("");
+      setMessage("");
+    }
+  }, [feedbackVersion]);
   async function handle(event) {
     event.preventDefault();
     setError("");
@@ -162,6 +169,7 @@ export function useData(path) {
   });
   const [version, setVersion] = useState(0);
   useEffect(() => {
+    if (path === null) return;
     let active = true;
     setState({ data: null, loading: true, error: null });
     api(path)

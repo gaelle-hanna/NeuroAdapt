@@ -136,8 +136,9 @@ export function AccessDenied() {
 
 export function PatientMonitoring({ user }) {
   const { id } = useParams(),
-    state = useData(`/monitoring/patients/${id}`);
-  if (state.error?.status === 403) return <AccessDenied />;
+    validId = /^\d+$/.test(id),
+    state = useData(validId ? `/monitoring/patients/${id}` : null);
+  if (!validId || state.error?.status === 403) return <AccessDenied />;
   const data = state.data;
   return (
     <DataState state={state}>

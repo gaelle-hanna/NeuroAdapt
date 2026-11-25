@@ -75,6 +75,7 @@ export function ManageUsers() {
     [filter, setFilter] = useState("all"),
     [editing, setEditing] = useState(null),
     [adding, setAdding] = useState(false),
+    [feedbackVersion, setFeedbackVersion] = useState(0),
     [message, setMessage] = useState(""),
     [error, setError] = useState(""),
     [busy, setBusy] = useState(false);
@@ -89,6 +90,7 @@ export function ManageUsers() {
   }
   async function toggle(u) {
     clearFeedback();
+    setFeedbackVersion((version) => version + 1);
     setBusy(true);
     try {
       await api(`/admin/users/${u.id}/status`, "PATCH", {
@@ -124,6 +126,7 @@ export function ManageUsers() {
             key={editing?.id || adding}
             disabled={busy}
             onSubmitStart={clearFeedback}
+            feedbackVersion={feedbackVersion}
             submit={
               editing
                 ? "Save professional"
@@ -329,6 +332,7 @@ export function ManageUsers() {
 export function Assignments() {
   const users = useData("/admin/users"),
     state = useData("/admin/assignments"),
+    [feedbackVersion, setFeedbackVersion] = useState(0),
     [error, setError] = useState(""),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false);
@@ -339,6 +343,7 @@ export function Assignments() {
   }
   async function remove(a) {
     clearFeedback();
+    setFeedbackVersion((version) => version + 1);
     setBusy(true);
     try {
       await api(`/admin/assignments/${a.id}`, "DELETE");
@@ -364,6 +369,7 @@ export function Assignments() {
             submit="Save assignment"
             disabled={busy}
             onSubmitStart={clearFeedback}
+            feedbackVersion={feedbackVersion}
             onSubmit={async (data) => {
               setBusy(true);
               try {
