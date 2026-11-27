@@ -13,6 +13,7 @@ from app.database import Base, get_db
 from app.main import app
 from app.core.security import limiter
 from app.models import User
+from app.routers import auth
 from app.schemas import Registration
 from app.services.accounts import create_account
 
@@ -30,8 +31,9 @@ def db():
 
 
 @pytest.fixture()
-def client(db):
+def client(db, monkeypatch):
     app.dependency_overrides[get_db] = lambda: db
+    monkeypatch.setattr(auth, 'SessionLocal', sessionmaker(db.get_bind(), expire_on_commit=False))
     limiter.entries.clear()
     with TestClient(app) as client:
         yield client

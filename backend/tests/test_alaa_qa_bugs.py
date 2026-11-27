@@ -1,27 +1,83 @@
+from threading import BoundedSemaphore
+
 from fastapi.testclient import TestClient
+from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 from conftest import headers
 from app.core.config import settings
+from app.core.security import digest
+from app.models import ResetToken
 from app.routers import auth
 
 
-def test_a01_response_starts_before_smtp(monkeypatch, client, patient):
+def test_a01_response_body_precedes_token_work_and_smtp(monkeypatch, client, patient):
     monkeypatch.setattr(settings, 'smtp_host', 'smtp.example.com')
     sequence = []
-    monkeypatch.setattr(auth, 'send_reset', lambda email, link: sequence.append('smtp'))
+    issue = auth.issue_reset_link
+
+    def record_issue(email):
+        sequence.append('lookup')
+        return issue(email)
+
+    def record_delivery(email, link):
+        token_hash = digest(link.split('#token=')[1])
+        with auth.SessionLocal() as db:
+            committed = db.scalar(select(ResetToken).where(ResetToken.TokenHash == token_hash)) is not None
+        sequence.append('smtp after commit' if committed else 'smtp before commit')
+
+    monkeypatch.setattr(auth, 'issue_reset_link', record_issue)
+    monkeypatch.setattr(auth, 'send_reset', record_delivery)
 
     async def observe(scope, receive, send):
         async def record(message):
-            if message['type'] == 'http.response.start':
-                sequence.append('response')
             await send(message)
+            if message['type'] == 'http.response.body' and not message.get('more_body', False):
+                sequence.append('response')
 
         await client.app(scope, receive, record)
 
     with TestClient(observe) as observed:
         assert observed.post('/api/auth/forgot-password',
                              json={'email': 'patient@example.com'}).status_code == 200
-    assert sequence == ['response', 'smtp']
+        assert sequence == ['response', 'lookup', 'smtp after commit']
+        sequence.clear()
+        assert observed.post('/api/auth/forgot-password',
+                             json={'email': 'unknown@example.com'}).status_code == 200
+    assert sequence == ['response', 'lookup']
+
+
+def test_a01_capacity_is_checked_without_account_lookup(monkeypatch, client, patient):
+    capacity = BoundedSemaphore(1)
+    capacity.acquire()
+    monkeypatch.setattr(auth, 'reset_capacity', capacity)
+    for email in ('patient@example.com', 'unknown@example.com'):
+        response = client.post('/api/auth/forgot-password', json={'email': email})
+        assert response.status_code == 503
+        assert response.json() == {'detail': 'Data could not be saved or retrieved. Please try again.'}
+    with auth.SessionLocal() as db:
+        assert db.scalars(select(ResetToken)).all() == []
+    capacity.release()
+    assert client.post('/api/auth/forgot-password', json={'email': 'patient@example.com'}).status_code == 200
+
+
+def test_a01_token_work_failure_is_generic_and_prevents_email(monkeypatch, client, patient, caplog):
+    monkeypatch.setattr(settings, 'smtp_host', 'smtp.example.com')
+    sent = []
+    monkeypatch.setattr(auth, 'send_reset', lambda *args: sent.append(args))
+
+    def fail(email):
+        raise SQLAlchemyError('synthetic private database details')
+
+    monkeypatch.setattr(auth, 'issue_reset_link', fail)
+    response = client.post('/api/auth/forgot-password', json={'email': 'patient@example.com'})
+    assert response.status_code == 200
+    assert response.json() == {
+        'message': 'If your address is registered, check your inbox for reset instructions.'
+    }
+    assert not sent
+    assert 'Password reset link could not be issued' in caplog.text
+    assert 'synthetic private database details' not in caplog.text
 
 
 def test_a01_smtp_failure_is_logged_without_details(monkeypatch, client, patient, caplog):

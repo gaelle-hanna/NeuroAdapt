@@ -1,10 +1,15 @@
 import secrets
 import logging
 from datetime import timedelta
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from threading import BoundedSemaphore
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
 from sqlalchemy import select, update
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
-from app.database import get_db
+from starlette.background import BackgroundTask
+from app.database import SessionLocal, get_db
 from app.models import User, ResetToken, now
 from app.schemas import CreatePatient, Credentials, ForgotPassword, ResetPassword
 from app.core.config import settings
@@ -13,6 +18,23 @@ from app.services.accounts import create_account, user_view, commit
 from app.services.mail import send_reset
 
 router = APIRouter(prefix='/auth', tags=['Authentication'])
+reset_capacity = BoundedSemaphore(8)
+
+
+class PasswordResetResponse(JSONResponse):
+    async def __call__(self, scope, receive, send):
+        # Reserve capacity before acknowledging the request, independently of account status.
+        if not reset_capacity.acquire(blocking=False):
+            response = JSONResponse(
+                {'detail': 'Data could not be saved or retrieved. Please try again.'},
+                status_code=503,
+            )
+            await response(scope, receive, send)
+            return
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            reset_capacity.release()
 
 
 @router.post('/register', status_code=201)
@@ -39,22 +61,39 @@ def me(user=Depends(current_user), db: Session = Depends(get_db)):
 
 
 @router.post('/forgot-password')
-def forgot(data: ForgotPassword, request: Request, background_tasks: BackgroundTasks,
-           db: Session = Depends(get_db)):
+async def forgot(data: ForgotPassword, request: Request):
     limiter.check(request, 'reset', 5)
     response = {'message': 'If your address is registered, check your inbox for reset instructions.'}
-    user = db.scalar(select(User).where(User.Email == str(data.email).lower(), User.Status == 'active').with_for_update())
-    if user:
+    email = str(data.email).lower()
+    if settings.environment == 'development' and settings.dev_reset_links and not settings.smtp_host:
+        delivery = await run_in_threadpool(issue_reset_link, email)
+        if delivery:
+            response['development_reset_link'] = delivery[1]
+        return response
+    return PasswordResetResponse(response, background=BackgroundTask(process_reset_request, email))
+
+
+def issue_reset_link(email):
+    with SessionLocal() as db:
+        user = db.scalar(select(User).where(User.Email == email, User.Status == 'active').with_for_update())
+        if not user:
+            return None
         token = secrets.token_urlsafe(48)
-        db.execute(update(ResetToken).where(ResetToken.UserID == user.UserID, ResetToken.UsedAt.is_(None)).values(UsedAt=now()))
-        db.add(ResetToken(UserID=user.UserID, TokenHash=digest(token), ExpiresAt=now() + timedelta(minutes=30)))
+        issued_at = now()
+        db.execute(update(ResetToken).where(ResetToken.UserID == user.UserID, ResetToken.UsedAt.is_(None)).values(UsedAt=issued_at))
+        db.add(ResetToken(UserID=user.UserID, TokenHash=digest(token), ExpiresAt=issued_at + timedelta(minutes=30)))
         commit(db)
-        link = f'{settings.frontend_url}/reset-password#token={token}'
-        if settings.smtp_host:
-            background_tasks.add_task(deliver_reset_email, user.Email, link)
-        elif settings.environment == 'development' and settings.dev_reset_links:
-            response['development_reset_link'] = link
-    return response
+        return user.Email, f'{settings.frontend_url}/reset-password#token={token}'
+
+
+def process_reset_request(email):
+    try:
+        delivery = issue_reset_link(email)
+    except (SQLAlchemyError, HTTPException):
+        logging.getLogger(__name__).error('Password reset link could not be issued')
+        return
+    if delivery and settings.smtp_host:
+        deliver_reset_email(*delivery)
 
 
 def deliver_reset_email(email, link):
