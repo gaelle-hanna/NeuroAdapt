@@ -19,7 +19,7 @@ import {
   MyProfile,
 } from "./PatientPages";
 import { Patients, PatientMonitoring } from "./ProfessionalPages";
-import { AdminDashboard, ManageUsers, Assignments } from "./AdminPages";
+import { AdminDashboard, ManageUsersRoute, Assignments } from "./AdminPages";
 
 const roleNames = {
   patient: "Patient",
@@ -217,7 +217,7 @@ export default function App() {
             ) : (
               <>
                 <Route index element={<AdminDashboard />} />
-                <Route path="users" element={<ManageUsers />} />
+                <Route path="users" element={<ManageUsersRoute />} />
                 <Route path="assignments" element={<Assignments />} />
               </>
             )}

@@ -50,6 +50,7 @@ export async function api(path, method = "GET", data) {
         : detail || "Something went wrong. Please try again.",
     );
     error.status = response.status;
+    error.detail = detail;
     throw error;
   }
   return result;

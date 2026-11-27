@@ -2,13 +2,41 @@ import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { createMemoryRouter, MemoryRouter, RouterProvider, Routes, Route } from "react-router-dom";
 import App, { Protected } from "./App";
 import { Form, Field, HistoryTable } from "./components";
 import { RecordMedication } from "./PatientPages";
 import { Patients } from "./ProfessionalPages";
 import { ManageUsers } from "./AdminPages";
-import { setToken } from "./api";
+import { api, setToken } from "./api";
+
+it("focuses the first invalid field in form order and clears only the corrected field", async () => {
+  vi.spyOn(global, "fetch").mockImplementation(() => json({
+    detail: [
+      { field: "specialization", message: "String should have at least 1 character" },
+      { field: "first_name", message: "String should have at least 1 character" },
+    ],
+  }, 422));
+  render(
+    <Form inlineErrors onSubmit={(data) => api("/profiles/professional", "PUT", data)}>
+      <Field label="First name" name="first_name" defaultValue="   " />
+      <Field label="Specialization" name="specialization" defaultValue="   " />
+    </Form>,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Save changes" }));
+  const firstName = screen.getByLabelText("First name");
+  const specialization = screen.getByLabelText("Specialization");
+  await waitFor(() => expect(firstName).toHaveFocus());
+  expect(firstName).toHaveAccessibleDescription("First name is required.");
+  expect(specialization).toHaveAttribute("aria-invalid", "true");
+  expect(specialization).toHaveAccessibleDescription("Specialization is required.");
+  await user.type(firstName, "Synthetic");
+  expect(firstName).toHaveFocus();
+  expect(firstName).not.toHaveAttribute("aria-invalid");
+  expect(specialization).toHaveAccessibleDescription("Specialization is required.");
+  expect(specialization).toHaveValue("   ");
+});
 
 it("requires patient details on public registration", async () => {
   renderApp("/register");
@@ -58,11 +86,8 @@ function json(data, status = 200) {
   });
 }
 function renderApp(path = "/login") {
-  return render(
-    <MemoryRouter initialEntries={[path]}>
-      <App />
-    </MemoryRouter>,
-  );
+  const router = createMemoryRouter([{ path: "*", element: <App /> }], { initialEntries: [path] });
+  return render(<RouterProvider router={router} />);
 }
 
 it("adds a patient from the Patients tab using the patient endpoint", async () => {

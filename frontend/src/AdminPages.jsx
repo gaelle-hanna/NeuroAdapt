@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
+import { useBlocker } from "react-router-dom";
 import { api } from "./api";
 import {
   Heading,
@@ -9,8 +10,10 @@ import {
   Empty,
   Badge,
   Notice,
+  RowFeedback,
   DataState,
   useData,
+  focusEditor,
   fullName,
   dateText,
 } from "./components";
@@ -69,7 +72,34 @@ export function AdminDashboard() {
   );
 }
 
-export function ManageUsers() {
+function hasUnsavedEdits(form) {
+  return form && Array.from(form.elements).some(
+    (field) => field instanceof HTMLInputElement && field.value !== field.defaultValue,
+  );
+}
+
+const confirmDiscard = () => window.confirm("Discard unsaved changes?");
+
+export function ManageUsersRoute() {
+  const editFormRef = useRef(null);
+  const blocker = useBlocker(({ currentLocation, nextLocation }) =>
+    currentLocation.pathname !== nextLocation.pathname && Boolean(hasUnsavedEdits(editFormRef.current)),
+  );
+  useEffect(() => {
+    if (blocker.state === "blocked") {
+      if (confirmDiscard()) blocker.proceed();
+      else {
+        blocker.reset();
+        focusEditor(editFormRef.current);
+      }
+    }
+  }, [blocker]);
+  return <ManageUsers editFormRef={editFormRef} />;
+}
+
+export function ManageUsers({ editFormRef } = {}) {
+  const localFormRef = useRef(null);
+  const formRef = editFormRef || localFormRef;
   const state = useData("/admin/users"),
     [search, setSearch] = useState(""),
     [filter, setFilter] = useState("all"),
@@ -77,7 +107,7 @@ export function ManageUsers() {
     [adding, setAdding] = useState(false),
     [feedbackVersion, setFeedbackVersion] = useState(0),
     [message, setMessage] = useState(""),
-    [error, setError] = useState(""),
+    [rowFeedback, setRowFeedback] = useState(null),
     [busy, setBusy] = useState(false);
   const users = (state.data || []).filter(
     (u) =>
@@ -86,20 +116,27 @@ export function ManageUsers() {
   );
   function clearFeedback() {
     setMessage("");
-    setError("");
+    setRowFeedback(null);
+  }
+  function canLeaveEditor() {
+    if (!hasUnsavedEdits(formRef.current) || confirmDiscard()) return true;
+    focusEditor(formRef.current);
+    return false;
   }
   async function toggle(u) {
     clearFeedback();
     setFeedbackVersion((version) => version + 1);
     setBusy(true);
     try {
-      await api(`/admin/users/${u.id}/status`, "PATCH", {
+      const updated = await api(`/admin/users/${u.id}/status`, "PATCH", {
         status: u.status === "active" ? "inactive" : "active",
       });
-      setMessage("Account status updated successfully.");
-      state.reload();
+      state.updateData((rows) => rows.map((row) =>
+        row.id === u.id ? { ...row, status: updated.status } : row,
+      ));
+      setRowFeedback({ id: u.id, message: "Account status updated successfully." });
     } catch (e) {
-      setError(e.message);
+      setRowFeedback({ id: u.id, message: e.message, error: true });
     } finally {
       setBusy(false);
     }
@@ -111,12 +148,11 @@ export function ManageUsers() {
         subtitle="Create patients and healthcare professionals and manage user accounts."
       />
       <Notice>{message}</Notice>
-      <Notice error>{error}</Notice>
       {(adding || editing) && (
         <Card
           title={
             editing
-              ? "Edit healthcare professional"
+              ? `Edit healthcare professional — ${fullName(editing)}`
               : adding === "patient"
                 ? "Create patient"
                 : "Create healthcare professional"
@@ -124,6 +160,10 @@ export function ManageUsers() {
         >
           <Form
             key={editing?.id || adding}
+            formRef={editing ? formRef : undefined}
+            focusOnOpen={Boolean(editing)}
+            inlineErrors
+            patientCreation={adding === "patient"}
             disabled={busy}
             onSubmitStart={clearFeedback}
             feedbackVersion={feedbackVersion}
@@ -169,6 +209,7 @@ export function ManageUsers() {
                 type="button"
                 disabled={busy}
                 onClick={() => {
+                  if (!canLeaveEditor()) return;
                   setAdding(false);
                   setEditing(null);
                 }}
@@ -200,10 +241,12 @@ export function ManageUsers() {
                 />
               </div>
             )}
-            <div className="notice info">
-              Passwords require at least 10 characters, including a letter and a
-              number.
-            </div>
+            {!editing && (
+              <div className="notice info">
+                Passwords require at least 10 characters, including a letter and a
+                number.
+              </div>
+            )}
           </Form>
         </Card>
       )}
@@ -219,6 +262,7 @@ export function ManageUsers() {
             <button
               disabled={busy}
               onClick={() => {
+                if (!canLeaveEditor()) return;
                 setAdding("patient");
                 setEditing(null);
                 clearFeedback();
@@ -231,6 +275,7 @@ export function ManageUsers() {
             <button
               disabled={busy}
               onClick={() => {
+                if (!canLeaveEditor()) return;
                 setAdding("professional");
                 setEditing(null);
                 clearFeedback();
@@ -251,9 +296,11 @@ export function ManageUsers() {
               disabled={busy}
               className={filter === value ? "selected" : ""}
               onClick={() => {
+                if (!canLeaveEditor()) return;
                 setFilter(value);
                 setAdding(false);
                 setEditing(null);
+                setRowFeedback(null);
               }}
             >
               {label}
@@ -296,6 +343,11 @@ export function ManageUsers() {
                             className="text-button"
                             disabled={busy}
                             onClick={() => {
+                              if (editing?.id === u.id) {
+                                focusEditor(formRef.current);
+                                return;
+                              }
+                              if (!canLeaveEditor()) return;
                               setEditing(u);
                               setAdding(false);
                               clearFeedback();
@@ -313,6 +365,7 @@ export function ManageUsers() {
                             {u.status === "active" ? "Deactivate" : "Activate"}
                           </button>
                         )}
+                        {rowFeedback?.id === u.id && <RowFeedback feedback={rowFeedback} />}
                       </td>
                     </tr>
                   ))}
@@ -332,24 +385,30 @@ export function Assignments() {
   const users = useData("/admin/users"),
     state = useData("/admin/assignments"),
     [feedbackVersion, setFeedbackVersion] = useState(0),
-    [error, setError] = useState(""),
+    [rowFeedback, setRowFeedback] = useState(null),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false);
   const available = users.data || [];
   function clearFeedback() {
     setMessage("");
-    setError("");
+    setRowFeedback(null);
   }
   async function remove(a) {
     clearFeedback();
     setFeedbackVersion((version) => version + 1);
     setBusy(true);
     try {
-      await api(`/admin/assignments/${a.id}`, "DELETE");
-      setMessage("Assignment deactivated. Historical records retained.");
-      state.reload();
+      const result = await api(`/admin/assignments/${a.id}`, "DELETE");
+      const refreshed = await api("/admin/assignments").catch(() => null);
+      state.updateData((rows) => refreshed ?? rows.map((row) =>
+        row.id === a.id ? { ...row, status: "inactive" } : row,
+      ));
+      setRowFeedback({
+        id: a.id,
+        message: refreshed ? result.message : `${result.message} The end date could not be refreshed.`,
+      });
     } catch (e) {
-      setError(e.message);
+      setRowFeedback({ id: a.id, message: e.message, error: true });
     } finally {
       setBusy(false);
     }
@@ -361,7 +420,6 @@ export function Assignments() {
         subtitle="Manage which healthcare professionals can access each patient."
       />
       <Notice>{message}</Notice>
-      <Notice error>{error}</Notice>
       <Card title="Assign a healthcare professional">
         <DataState state={users}>
           <Form
@@ -446,8 +504,9 @@ export function Assignments() {
                             Deactivate assignment
                           </button>
                         ) : (
-                          `Ended ${dateText(a.unassigned_at + "Z")}`
+                          a.unassigned_at ? `Ended ${dateText(a.unassigned_at + "Z")}` : "Ended"
                         )}
+                        {rowFeedback?.id === a.id && <RowFeedback feedback={rowFeedback} />}
                       </td>
                     </tr>
                   ))}

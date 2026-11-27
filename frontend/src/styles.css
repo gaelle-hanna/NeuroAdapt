@@ -249,6 +249,22 @@ input:disabled {
   color: #b3263b;
   border-color: #ffd1d9;
 }
+.field [aria-invalid="true"] {
+  border-color: #b3263b;
+}
+.field .field-error {
+  margin: 4px 0 0;
+  color: #b3263b;
+  font-size: 14px;
+}
+.row-feedback {
+  scroll-margin-block: 12px;
+}
+.row-feedback .notice {
+  margin: 6px 0 0;
+  padding: 6px 10px;
+  max-width: 26ch;
+}
 .notice.info {
   background: #eff6ff;
   color: #285da4;

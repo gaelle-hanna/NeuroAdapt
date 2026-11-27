@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "./api";
 import {
@@ -10,9 +10,11 @@ import {
   Empty,
   DataState,
   useData,
+  focusEditor,
   HistoryTable,
   Badge,
   Notice,
+  RowFeedback,
   fullName,
   dateText,
 } from "./components";
@@ -222,30 +224,33 @@ export function MedicationFields({ medication = {} }) {
 }
 
 export function Medications() {
+  const formRef = useRef(null);
   const state = useData("/medications"),
     [editing, setEditing] = useState(null),
     [message, setMessage] = useState(""),
-    [error, setError] = useState(""),
+    [rowFeedback, setRowFeedback] = useState(null),
+    [feedbackVersion, setFeedbackVersion] = useState(0),
     [busy, setBusy] = useState(false);
   function clearFeedback() {
     setMessage("");
-    setError("");
+    setRowFeedback(null);
   }
   async function toggle(m) {
     clearFeedback();
+    setFeedbackVersion((version) => version + 1);
     setBusy(true);
     try {
-      await api(`/medications/${m.id}`, "PUT", {
+      const updated = await api(`/medications/${m.id}`, "PUT", {
         medication_name: m.medication_name,
         dosage: m.dosage,
         frequency: m.frequency,
         instructions: m.instructions,
         is_active: !m.is_active,
       });
-      setMessage("Medication updated successfully.");
-      state.reload();
+      state.updateData((rows) => rows.map((row) => row.id === m.id ? updated : row));
+      setRowFeedback({ id: m.id, message: "Medication updated successfully." });
     } catch (e) {
-      setError(e.message);
+      setRowFeedback({ id: m.id, message: e.message, error: true });
     } finally {
       setBusy(false);
     }
@@ -257,10 +262,13 @@ export function Medications() {
         subtitle="Manage your own medication entries for intake tracking."
       />
       <Notice>{message}</Notice>
-      <Notice error>{error}</Notice>
-      <Card title={editing ? "Edit medication" : "Add medication"}>
+      <Card title={editing ? `Edit medication — ${editing.medication_name}` : "Add medication"}>
         <Form
           key={editing?.id || "new"}
+          formRef={formRef}
+          focusOnOpen={Boolean(editing)}
+          inlineErrors={Boolean(editing)}
+          feedbackVersion={feedbackVersion}
           disabled={busy}
           onSubmitStart={clearFeedback}
           onSubmit={async (data, form) => {
@@ -329,7 +337,8 @@ export function Medications() {
                           disabled={busy}
                           onClick={() => {
                             clearFeedback();
-                            setEditing(m);
+                            if (editing?.id === m.id) focusEditor(formRef.current);
+                            else setEditing(m);
                           }}
                         >
                           Edit
@@ -341,6 +350,7 @@ export function Medications() {
                         >
                           {m.is_active ? "Deactivate" : "Activate"}
                         </button>
+                        {rowFeedback?.id === m.id && <RowFeedback feedback={rowFeedback} />}
                       </td>
                     </tr>
                   ))}
@@ -501,6 +511,7 @@ export function MyProfile({ user, onUpdate }) {
           {state.data && (
             <Form
               key={revision}
+              inlineErrors
               onSubmit={async (data) => {
                 Object.keys(data).forEach((k) => {
                   if (!data[k]) data[k] = null;
